@@ -7,7 +7,7 @@ import functools
 
 from mlc_llm.loader import ExternMapping
 from mlc_llm.quantization import Quantization
-
+import numpy as np
 from .phi3v_model import Phi3VConfig, Phi3VForCausalLM
 
 
@@ -75,6 +75,32 @@ def huggingface(model_config: Phi3VConfig, quantization: Quantization) -> Extern
         _add_vision(f"{prefix}.{i}.mlp.fc1.weight")
         _add_vision(f"{prefix}.{i}.mlp.fc2.bias")
         _add_vision(f"{prefix}.{i}.mlp.fc2.weight")
+        # mlc_qkv_name = f"{prefix}.{i}.self_attn.qkv.weight"
+        # mapping.add_mapping(
+        #     mlc_qkv_name,
+        #     [
+        #         f"model.{prefix}.{i}.self_attn.q_proj.weight",
+        #         f"model.{prefix}.{i}.self_attn.k_proj.weight",
+        #         f"model.{prefix}.{i}.self_attn.v_proj.weight",
+        #     ],
+        #     functools.partial(
+        #         lambda q, k, v, dtype: np.concatenate([q, k, v], axis=0).astype(dtype),
+        #         dtype=named_parameters[mlc_qkv_name].dtype,
+        #     ),
+        # )
+        # mlc_qkv_name = (f"{prefix}.{i}.self_attn.qkv.bias")
+        # mapping.add_mapping(
+        #     mlc_qkv_name,
+        #     [
+        #         f"model.{prefix}.{i}.self_attn.q_proj.bias",
+        #         f"model.{prefix}.{i}.self_attn.k_proj.bias",
+        #         f"model.{prefix}.{i}.self_attn.v_proj.bias",
+        #     ],
+        #     functools.partial(
+        #         lambda q, k, v, dtype: np.concatenate([q, k, v], axis=0).astype(dtype),
+        #         dtype=named_parameters[mlc_qkv_name].dtype,
+        #     ),
+        # )
         _add_vision(f"{prefix}.{i}.self_attn.k_proj.bias")
         _add_vision(f"{prefix}.{i}.self_attn.k_proj.weight")
         _add_vision(f"{prefix}.{i}.self_attn.out_proj.bias")
