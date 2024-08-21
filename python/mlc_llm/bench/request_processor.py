@@ -49,7 +49,25 @@ class SampleRequests(RequestProcessor):  # pylint: disable=too-few-public-method
         self.num_requests = num_requests
 
     def __call__(self, request_records: List[RequestRecord]) -> List[RequestRecord]:
-        return random.sample(request_records, self.num_requests)
+        sample = []
+        remaining_num_requests = self.num_requests
+        while remaining_num_requests > 0:
+            current_num_sample = min(remaining_num_requests, len(request_records))
+            sample += random.sample(request_records, current_num_sample)
+            remaining_num_requests -= current_num_sample
+        return sample
+
+
+class AttachModelName(RequestProcessor):  # pylint: disable=too-few-public-methods
+    """The processor that attaches model name to requests."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    def __call__(self, request_records: List[RequestRecord]) -> List[RequestRecord]:
+        for request_record in request_records:
+            request_record.chat_cmpl.model = self.model
+        return request_records
 
 
 class AttachRequestRateTimestamp(RequestProcessor):  # pylint: disable=too-few-public-methods
@@ -94,6 +112,23 @@ class AttachStreamFlag(RequestProcessor):  # pylint: disable=too-few-public-meth
         return request_records
 
 
+class AttachSamplingOptions(RequestProcessor):  # pylint: disable=too-few-public-methods
+    """The processor that attaches the stream flag to the requests."""
+
+    def __init__(self, temperature: float, top_p: float) -> None:
+        self.temperature = temperature
+        self.top_p = top_p
+
+    def __call__(self, request_records: List[RequestRecord]) -> List[RequestRecord]:
+        for request_record in request_records:
+            request_record.chat_cmpl.temperature = self.temperature
+            request_record.chat_cmpl.top_p = self.top_p
+            request_record.chat_cmpl.frequency_penalty = 0.0
+            request_record.chat_cmpl.presence_penalty = 0.0
+            request_record.chat_cmpl.tool_choice = "none"
+        return request_records
+
+
 class MetricAnalyzer(RequestProcessor):  # pylint: disable=too-few-public-methods
     """The processor that analyzes the raw benchmark results and computes more detailed metrics."""
 
@@ -108,7 +143,10 @@ class MetricAnalyzer(RequestProcessor):  # pylint: disable=too-few-public-method
                 continue
 
             metrics.output_tokens = len(self.tokenizer.encode(request_record.output_str))
-            assert metrics.input_tokens > 0 and metrics.output_tokens > 0, "Invalid prompt tokens"
+            if metrics.output_tokens < 2:
+                metrics.success = False
+                continue
+            assert metrics.input_tokens > 0, "Invalid prompt tokens"
             metrics.inter_token_latency_s = metrics.end_to_end_latency_s / metrics.output_tokens
             if metrics.time_to_first_token_s is None:
                 metrics.time_to_first_token_s = 0
@@ -142,6 +180,7 @@ class WarmupAndRun(RequestProcessor):  # pylint: disable=too-few-public-methods
             request_record.timestamp = 0 if request_record.timestamp is not None else None
 
         # Warmup
+        warmup_requests = self._process_warmup_requests(warmup_requests)
         logger.info("Warmup with %d request(s)...", self.num_warmup_requests)
         self.pipeline(warmup_requests)
 
@@ -158,6 +197,22 @@ class WarmupAndRun(RequestProcessor):  # pylint: disable=too-few-public-methods
             assert cuda_profiler_stop_response.status_code == 200
 
         return updated_request_records
+
+    def _process_warmup_requests(self, warmup_requests: List[RequestRecord]) -> List[RequestRecord]:
+        if len(warmup_requests) == 0:
+            return warmup_requests
+        # NOTE: to warm up the server for as more different batch sizes as possible,
+        # we usese 128 output tokens for the first request and use two more tokens
+        # for every followup request.
+        # Setting a high temperature and top-p to avoid early stop as much as possible.
+        warmup_requests[0].chat_cmpl.max_tokens = 128
+        for i in range(1, len(warmup_requests)):
+            warmup_requests[i].chat_cmpl.max_tokens = (
+                warmup_requests[i - 1].chat_cmpl.max_tokens + 1
+            )
+            warmup_requests[i].chat_cmpl.temperature = 2.0
+            warmup_requests[i].chat_cmpl.top_p = 1.0
+        return warmup_requests
 
 
 class SequentialProcessor(RequestProcessor):  # pylint: disable=too-few-public-methods
@@ -424,7 +479,9 @@ def create_pipelines(
                 SequentialProcessor(
                     LogMessage(f"Fixing number of concurrent requests: {num_concurrent_requests}"),
                     SampleRequests(args.num_requests + num_warmup_requests),
+                    AttachModelName(args.tokenizer),
                     AttachStreamFlag(args.stream),
+                    AttachSamplingOptions(args.temperature, args.top_p),
                     AttachExecutionFeature({"num_concurrent_requests": num_concurrent_requests}),
                     WarmupAndRun(
                         num_warmup_requests=num_warmup_requests,
@@ -451,8 +508,10 @@ def create_pipelines(
             SequentialProcessor(
                 LogMessage(f"Fixing request rate: {request_rate}"),
                 SampleRequests(args.num_requests + args.num_warmup_requests),
+                AttachModelName(args.tokenizer),
                 AttachRequestRateTimestamp(request_rate),
                 AttachStreamFlag(args.stream),
+                AttachSamplingOptions(args.temperature, args.top_p),
                 AttachExecutionFeature({"request_rate": request_rate}),
                 WarmupAndRun(
                     num_warmup_requests=args.num_warmup_requests,

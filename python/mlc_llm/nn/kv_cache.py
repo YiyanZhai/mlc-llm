@@ -489,7 +489,7 @@ def _rope(
     rope_scaling: Dict[str, Any],
 ):
     d = indices[-1]
-    cos_freq, sin_freq = switch_rope_freq_func(rope_scaling)(
+    cos_freq, sin_freq, var_map = switch_rope_freq_func(rope_scaling)(
         offset * scale, d, rotary_dim, theta, "float32"
     )
     cos = cos_freq * buffer[indices].astype("float32")
@@ -498,7 +498,10 @@ def _rope(
         -buffer[indices[:-1] + (d + rotary_dim // 2,)],
         buffer[indices[:-1] + (d - rotary_dim // 2,)],
     ).astype("float32")
-    return (cos + sin).astype(qkv_dtype)
+    expr = (cos + sin).astype(qkv_dtype)
+    for var, value in var_map.items():
+        expr = tir.Let(var, value, expr)
+    return expr
 
 
 def _var(dtype):
@@ -928,7 +931,9 @@ def _attention_decode(
 
     THREAD_LIMIT = 512
     TILE_SIZE_PER_BDX = 2
-    if target.kind.name == "opencl" and "android" in str(target.host):
+    if target.kind.name == "opencl" and (
+        ("android" in str(target.host)) or ("adreno" in str(target.attrs))
+    ):
         THREAD_LIMIT = 256 if H_kv < 8 else 512
         TILE_SIZE_PER_BDX = 1
     max_num_threads_per_block = get_max_num_threads_per_block(target)

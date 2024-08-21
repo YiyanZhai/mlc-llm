@@ -357,9 +357,8 @@ EngineConfig EngineConfig::FromJSONAndInferredConfig(
 
   n->prefix_cache_mode = PrefixCacheModeFromString(json::LookupOrDefault<std::string>(
       json, "prefix_cache_mode", PrefixCacheModeToString(n->prefix_cache_mode)));
-  n->prefix_cache_max_num_recycling_seqs =
-      json::LookupOrDefault<int64_t>(json, "prefix_cache_max_recycling_seqs", n->max_num_sequence);
-
+  n->prefix_cache_max_num_recycling_seqs = json::LookupOrDefault<int64_t>(
+      json, "prefix_cache_max_num_recycling_seqs", n->max_num_sequence);
   return EngineConfig(n);
 }
 
@@ -730,6 +729,7 @@ Result<InferrableEngineConfig> InferrableEngineConfig::InferForKVCache(
       }
       params_bytes += param_size;
     }
+    params_bytes /= metadata.pipeline_parallel_stages;
     for (const auto& [func_name, temp_buffer_size] : metadata.memory_usage) {
       temp_buffer_bytes = std::max(temp_buffer_bytes, temp_buffer_size);
     }
