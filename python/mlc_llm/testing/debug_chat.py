@@ -266,7 +266,7 @@ class DebugChat:  # pylint: disable=too-many-instance-attributes, too-few-public
         if self.conversation.system_prefix_token_ids is not None:
             tokens[0] = self.conversation.system_prefix_token_ids + tokens[0]
 
-        tokens = tvm.nd.array(np.array(tokens[0]).astype("int32"), device=self.device)
+        tokens = tvm.nd.array(np.array([128000,   6151,     11,   3371,    757,    922,    279,   7438,    315,  2324]).astype("int32"), device=self.device)
         return tokens
 
     def _embed(self, tokens: tvm.nd.array) -> Tuple[tvm.nd.NDArray, int]:
@@ -295,9 +295,7 @@ class DebugChat:  # pylint: disable=too-many-instance-attributes, too-few-public
             if self.chat_config.prefill_chunk_size
             else self.metadata["prefill_chunk_size"]
         )
-        max_total_sequence_length = (
-            sliding_window_size if context_window_size == -1 else context_window_size
-        )
+        max_total_sequence_length = 1000
         support_sliding_window = int(sliding_window_size != -1)
 
         kv_caches = self.create_kv_cache_func(
@@ -387,7 +385,7 @@ class DebugChat:  # pylint: disable=too-many-instance-attributes, too-few-public
         print(f"Debug instrument output dumped to {green(path_str)}")
 
         print("======================= Starts Decode =======================")
-        for i in range(generate_length - 1):
+        for i in range(1):
             self.instrument.reset(self.debug_dir / f"decode_{i}")
             logits = self._decode(next_token, kv_caches)
             next_token = self._sample_token_from_logits(logits)
